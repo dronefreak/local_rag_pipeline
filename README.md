@@ -72,13 +72,14 @@ Follow these steps to get your own local AI assistant running.
     └── topic_B/
         └── doc2.txt
     ```
+3.  You can find some data samples that I was using personally on my side [here](https://drive.google.com/file/d/1BCb1tkgav3gC7F9MxZhCyVYfnjZzpA7s/view?usp=sharing). These documents are available on the internet for free and there is no copyright issue, in fact most of them are datasheets of electronic equipments that are made public by the companies themselves.
 
 ### 4. Configure and Run
 
 1.  **Download a model with Ollama:** I personally recommend starting with a powerful model like Llama 3 8B or Mixtral. Please install Ollama first (it is fairly simple), now run the following command in a separate terminal:
     `bash
-    ollama run llama3:8b # Or 'ollama run mixtral'
-    `
+ollama run llama3:8b # Or 'ollama run mixtral'
+`
     Please note that you can also create your custom ollama servings using a `Modelfile` that uses a local downloaded .gguf model. Look under the `modelfiles` folder for more information.
 2.  **Update `rag.py`:** Change the `MODEL_NAME` global constant to match the model you downloaded (e.g., `MODEL_NAME = "llama3:8b"`).
 3.  **Run the application:**
