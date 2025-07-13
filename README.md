@@ -108,3 +108,7 @@ This project provides a decent foundation. I am currently working on some update
   - While `all-MiniLM-L6-v2` is fast and efficient, you could experiment with larger, more powerful embedding models like `bge-large-en-v1.5` or Cohere's `embed-english-v3.0` to potentially improve retrieval accuracy, especially for nuanced or domain-specific language.
 
 ---
+
+If you like this project, leave a star so and please feel free to point out issues and open up discussions on what could be improved/changed or done better in this project.
+
+As always, Hare Krishna and happy coding!
