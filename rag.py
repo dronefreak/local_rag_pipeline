@@ -24,7 +24,7 @@ from langchain_core.runnables import RunnablePassthrough
 
 # --- Global Constants ---
 DATA_PATH = "data/"
-DB_PATH = "vectorstore_semantic_fusion/"  # New DB path for the final architecture
+DB_PATH = "vectorstore/"  # New DB path for the final architecture
 MODEL_NAME = "llama3-8b-q6k"
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     db = Chroma(persist_directory=DB_PATH, embedding_function=embeddings)
     retriever = db.as_retriever()
 
-    llm = ChatOllama(model=MODEL_NAME, temperature=0, top_p=1, seed=42)
+    llm = ChatOllama(model=MODEL_NAME, temperature=0.1, top_p=0.9, seed=42)
 
     # --- RAG Fusion Implementation ---
     query_gen_template = """You are a helpful assistant that generates multiple
