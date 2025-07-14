@@ -1,4 +1,4 @@
-# --- Data Ingestion and Vector Store Imports ---
+# Data Ingestion and Vector Store Imports
 
 import concurrent.futures
 import os
@@ -9,37 +9,34 @@ from langchain.load import dumps, loads
 # from langchain_experimental.text_splitter import SemanticChunker
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_community.document_loaders import (  # For PDF loading
-    CSVLoader,
-    PyMuPDFLoader,
-    TextLoader,
-    UnstructuredPDFLoader,
-)
+from langchain_community.document_loaders import CSVLoader, PyMuPDFLoader, TextLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+
+# from src.utils import get_rich_console
 
 
-# Hierarchical Data Ingestion
-def process_file(file_path, doc_metadata, console=None):
-    """A helper function to process a single file.
+# The worker function now also handles the splitting.
+def process_and_split_file(file_path, doc_metadata, text_splitter):
+    """Worker function to load a single file, process its content, and then split it
+    into chunks.
 
-    This will be run in parallel. Returns a list of Document objects.
+    Returns a list of chunked Document objects.
     """
     try:
+        # Step 1: Load the full document based on its type
         if file_path.endswith(".pdf"):
-            # Try the fast loader first
-            fast_loader = PyMuPDFLoader(file_path)
-            docs = fast_loader.load()
-            # If fast loader fails (no text), fall back to OCR
-            if not docs or not docs[0].page_content.strip():
-                console.print(
-                    f"  - PyMuPDF failed for {os.path.basename(file_path)},"
-                    " falling back to OCR...",
-                    style="warning",
-                )
-                ocr_loader = UnstructuredPDFLoader(
-                    file_path, mode="single", strategy="ocr_only"
-                )
-                docs = ocr_loader.load()
+            # "hi_res" strategy is computationally intensive but provides
+            # the best results for datasheets by understanding layout,
+            # tables, and embedded objects.
+            # loader = UnstructuredPDFLoader(
+            #     file_path,
+            #     mode="single",
+            #     # strategy="hi_res",
+            #     infer_table_structure=True # This is key: converts tables to HTML
+            # )
+            loader = PyMuPDFLoader(file_path)
+            docs = loader.load()
         elif file_path.endswith(".txt"):
             loader = TextLoader(file_path, encoding="utf-8")
             docs = loader.load()
@@ -47,33 +44,39 @@ def process_file(file_path, doc_metadata, console=None):
             loader = CSVLoader(file_path=file_path, encoding="utf-8")
             docs = loader.load()
         else:
-            return []  # Return empty list for unsupported files
+            return []
 
-        # Add the hierarchical metadata to the loaded documents
+        # Step 2: Apply metadata to every page/doc loaded from this single file
         for doc in docs:
             doc.metadata.update(doc_metadata)
-        return docs
+
+        # Step 3: Perform text splitting ON THIS DOCUMENT ONLY
+        # The splitter will see all pages from this single
+        # file as one continuous sequence
+        chunked_docs = text_splitter.split_documents(docs)
+
+        return chunked_docs
     except Exception as e:
-        console.print(
-            f"  - CRITICAL ERROR loading {os.path.basename(file_path)}: {e}",
-            style="danger",
-        )
+        # Log the error with the specific file that caused it
+        print(f"\nError processing file {os.path.basename(file_path)}: {e}")
         return []
 
 
-def create_vector_store(config, console=None):
-    """Creates a Chroma vector store by processing files in parallel."""
+# The main orchestrator function
+def create_vector_store(config, console):
+    """Creates a Chroma vector store by processing and splitting each file individually
+    in parallel, ensuring contextual integrity."""
     console.print(
-        f"--- Creating new parallelized vector store at {config.vectorstore_path} ---"
+        f"Creating/updating vector store at [cyan]{config.vectorstore_path}[/cyan]"
     )
 
     # 1. Gather all file paths and their associated metadata
     files_to_process = []
+    # (This logic is the same as before, omitted for brevity)
     root_data_path = config.dataset_path
     if not os.path.exists(root_data_path):
         console.print(
-            f"!!! Dataset path {root_data_path} does not exist. Exiting. !!!",
-            style="danger",
+            f"!!! Dataset path {root_data_path} does not exist. !!!", style="bold red"
         )
         return None
     for root, dirs, files in os.walk(root_data_path):
@@ -88,53 +91,62 @@ def create_vector_store(config, console=None):
             doc_metadata["topic"] = path_parts[0]
         if len(path_parts) > 1:
             doc_metadata["sub_topic"] = path_parts[1]
-
         for filename in files:
             files_to_process.append((os.path.join(root, filename), doc_metadata))
 
-    # 2. Process files in parallel using a thread pool
-    all_documents = []
-    # Adjust max_workers based on your CPU cores, but don't go too high for I/O tasks
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        # Use partial to "pre-fill" the process_file function
-        future_to_docs = {
-            executor.submit(process_file, file_path, metadata, console): (
-                file_path,
-                metadata,
-                console,
-            )
-            for file_path, metadata in files_to_process
-        }
-
-        for future in concurrent.futures.as_completed(future_to_docs):
-            docs = future.result()
-            if docs:
-                all_documents.extend(docs)
-
-    if not all_documents:
-        console.print("!!! No documents found to process. !!!", style="warning")
-        return
-
-    # 3. Chunk, Embed, and Store (same as before)
-    embeddings = HuggingFaceEmbeddings(
-        model_name=config.embedding_model, model_kwargs={"device": config.device}
-    )
+    # Initialize the text splitter here, so we can pass it to the workers
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=config.recursive_text_splitter.chunk_size,
         chunk_overlap=config.recursive_text_splitter.chunk_overlap,
     )
-    texts = text_splitter.split_documents(all_documents)
-    console.print(
-        f"\n--- Total documents loaded: {len(all_documents)},"
-        f" split into {len(texts)} chunks ---",
-        style="info",
+
+    all_chunked_texts = []
+
+    # 2. Process and split files in parallel
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console,
+    ) as progress:
+        task = progress.add_task(
+            "[green]Chunking documents...", total=len(files_to_process)
+        )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            # We pass the splitter instance to each worker
+            future_to_chunks = {
+                executor.submit(process_and_split_file, path, meta, text_splitter): path
+                for path, meta in files_to_process
+            }
+
+            for future in concurrent.futures.as_completed(future_to_chunks):
+                chunked_docs = future.result()
+                if chunked_docs:
+                    all_chunked_texts.extend(chunked_docs)
+                progress.update(task, advance=1)
+
+    if not all_chunked_texts:
+        console.print(
+            "!!! No documents were successfully processed. !!!", style="bold yellow"
+        )
+        return None
+
+    # 3. Embed and Store the final list of chunks
+    console.print(f"\nEmbedding {len(all_chunked_texts)} total text chunks...")
+    embeddings = HuggingFaceEmbeddings(
+        model_name=config.embedding_model, model_kwargs={"device": config.device}
     )
 
     db = Chroma.from_documents(
-        documents=texts, embedding=embeddings, persist_directory=config.vectorstore_path
+        documents=all_chunked_texts,  # We now use the final list of chunks
+        embedding=embeddings,
+        persist_directory=config.vectorstore_path,
     )
     console.print(
-        "--- Parallelized Chroma vector store created successfully. ---", style="info"
+        "Vector store created successfully with per-document chunking.",
+        style="bold green",
     )
     return db
 
