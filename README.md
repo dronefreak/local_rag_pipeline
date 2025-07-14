@@ -1,12 +1,10 @@
 # Local RAG Fusion AI Assistant
 
-Welcome to the **Local RAG Fusion AI Assistant**, a powerful, private, and highly advanced retrieval-augmented generation (RAG) pipeline that runs entirely on your local machine. This project is the culmination of building a robust system capable of understanding and answering questions from a complex, nested library of private documents, while also leveraging GPU acceleration for high performance.
-
-This is a realtively simple Q&A bot but a few sophisticated implementations for for data ingestion, retrieval, and response generation allow for versatile use cases.
+Welcome to the **Local RAG Fusion AI Assistant**, a powerful, private, and highly advanced retrieval-augmented generation (RAG) pipeline that runs entirely on your local machine. This is a realtively simple Q&A bot but a few sophisticated implementations for for data ingestion, retrieval, and response generation allow for versatile use cases.
 
 ## Key Strengths & Advanced Features
 
-This project showcases a modern, state-of-the-art local RAG architecture, moving beyond basic prototypes to a system built for accuracy and scalability.
+This project is built using a modern, state-of-the-art local RAG architecture, something that I did not find in other implementations:
 
 - **Intelligent Retrieval with RAG Fusion:** Instead of a simple vector search, this pipeline uses RAG Fusion. It takes a single user query, generates multiple perspectives on it, searches for all of them in parallel, and uses a Reciprocal Rank Fusion algorithm to intelligently re-rank and fuse the results. This makes retrieval highly resilient to the user's phrasing and excellent at finding information buried deep within documents.
 
@@ -26,7 +24,7 @@ This project showcases a modern, state-of-the-art local RAG architecture, moving
 
 ## Setup and Installation
 
-Follow these steps to get your own local AI assistant running.
+Follow these steps to get your own local AI assistant up and running!
 
 ### 1. Prerequisites
 
@@ -45,20 +43,14 @@ Follow these steps to get your own local AI assistant running.
     ```bash
     conda env create -f environment.yml
     ```
-3.  **Install `llama-cpp-python` with CUDA support (if not already installed):**
-    - **For Windows:**
+3.  **Install `llama-cpp-python` with CUDA support (if not already installed) and other requirements from the given .txt file:**
 
-      ```cmd
-        $env:CMAKE_ARGS = "-DGGML_CUDA=on"
-        pip install llama-cpp-python
+    ```bash
+      pip install -r requirements.txt
+    ```
 
-      ```
-
-    - **For Linux/macOS:**
-      ```bash
-        CMAKE_ARGS="-DGGML_CUDA=on" LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu"  pip install llama-cpp-python
-      ```
-      Please note that `llama-cpp-python` is under heavy active development, which is why the code snippets and function calls might be outdated sooner than expected. Please adapt the calls according to the versions you are using in your projects.
+    Please note that `llama-cpp-python` is under heavy active development, which is why the code snippets and function calls might be outdated sooner than expected. Please adapt the calls according to the versions you are using in your projects.
+    It is totally possible that the installation fails for `llama-cpp-python` while trying to build it for CUDA, it is toally possible to use CPU (much easier build process) but with some speed limitations.
 
 ### 3. Prepare Your Data
 
@@ -84,28 +76,9 @@ ollama run llama3:8b # Or 'ollama run mixtral'
 2.  **Update `rag.py`:** Change the `MODEL_NAME` global constant to match the model you downloaded (e.g., `MODEL_NAME = "llama3:8b"`).
 3.  **Run the application:**
     ```bash
-    python rag.py
+    python src/rag.py
     ```
 4.  The first time you run it, the script will build the vector database. This may take some time, especially if you have many PDFs requiring OCR. Subsequent runs will be much faster.
-
-## Future Improvements & Next Steps
-
-This project provides a decent foundation. I am currently working on some updates for the future, please let me know in discussions if there is something you would like to see specifically:
-
-- **Implement a Web UI:**
-  - Wrap the application in a user-friendly web interface using **Streamlit** or **Gradio**. This would allow for easy interaction, displaying chat history, and visualizing source documents.
-
-- **Upgrade to More Powerful Models:**
-  - As new and better open-source models are released, you can easily test them. For example, moving from an 8B model to a 70B model (like `llama3:70b`) on a machine with more VRAM (e.g., RTX 4090 with 24GB) would provide a massive leap in reasoning capabilities. I am current running Ubuntu 24 on a PC with RTX 4070 Super 12GB VRAM, it works just fine for the 8B models. Consider changing the models to suit your needs and according to the hardware specifications on your paltform.
-
-- **Advanced Agentic Workflow with Tools:**
-  - Re-integrate the agent architecture to give the bot more tools, such as a **Calculator**, a **Python REPL** for data analysis, or the **Tavily Web Search** for real-time information. The current RAG Fusion pipeline could become one powerful tool that the agent can choose to use. There is a loose implementation of **Tavily Web Search** already in the pipeline, but I would not recommend using it for the moment, perhaps I will remove it in the future.
-
-- **Systematic Evaluation with RAGAs:**
-  - Implement the **RAGAs** (RAG Assessment) framework to quantitatively measure the performance of the pipeline. This allows you to objectively test changes (like different chunking strategies or embedding models) and see their impact on metrics like `Faithfulness` and `Answer Relevancy`.
-
-- **Explore Alternative Embedding Models:**
-  - While `all-MiniLM-L6-v2` is fast and efficient, you could experiment with larger, more powerful embedding models like `bge-large-en-v1.5` or Cohere's `embed-english-v3.0` to potentially improve retrieval accuracy, especially for nuanced or domain-specific language.
 
 ---
 
