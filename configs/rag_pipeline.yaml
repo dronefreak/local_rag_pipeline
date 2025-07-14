@@ -1,0 +1,28 @@
+# Base configuration for the RAG Fusion Pipeline.
+# Parameters marked as "???" have to be specified.
+# All other parameters can be overridden by the command line or other configuration
+# files.
+
+# Note that whatever is in the main config file will override the defaults
+# and not the other way around.
+
+defaults: # these are the sub-config files for specific details, noee for the moment.
+  - _self_ # this makes the top-level config take priority over sub-configs, see https://hydra.cc/docs/upgrades/1.0_to_1.1/default_composition_order/
+
+dataset_path: data
+vectorstore_path: vectorstore
+embedding_model: sentence-transformers/all-MiniLM-L6-v2
+device: cuda # or cpu, depending on your hardware
+model:
+  name: llama3-8b-q6k
+  type: llama
+  quantization: q6k # or q4_0, depending on your hardware and model size
+  revision: main # or a specific commit hash if needed
+  temperature: 0.7
+  top_p: 0.95
+  max_new_tokens: 512
+  repetition_penalty: 1.2
+  seed: 42
+recursive_text_splitter:
+  chunk_size: 512
+  chunk_overlap: 100

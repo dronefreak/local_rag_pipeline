@@ -1,0 +1,31 @@
+# 1. Specify the base GGUF file (use the absolute path)
+FROM /home/username/projects/models/mistral-7b-instruct-v0.2.Q5_K_M.gguf
+
+# 2. Set the default parameters for this model tag
+# These correspond to your LlamaCpp settings
+<!-- These local models can be used.
+llama2-chat.gguf                      mistral-7b-instruct-v0.2.Q5_K_M.gguf
+Meta-Llama-3-8B-Instruct-Q4_K_M.gguf  mistral-7b-instruct-v0.2.Q5_K_S.gguf
+Meta-Llama-3-8B-Instruct-Q5_K_M.gguf  mistral.gguf
+Meta-Llama-3-8B-Instruct-Q6_K.gguf    phi-2.gguf
+Meta-Llama-3-8B-Instruct-Q8_0.gguf -->
+
+# Context window size
+PARAMETER num_ctx 8192
+
+# Batch size for prompt processing
+PARAMETER num_batch 512
+
+# --- Parameters for Reproducibility ---
+
+# Set a very low temperature for deterministic-like outputs
+PARAMETER temperature 0.1
+
+# Disable nucleus sampling by setting top_p to 1
+PARAMETER top_p 1
+
+# Set a fixed seed for the random number generator
+PARAMETER seed 42
+
+# 3. (Optional) Set a default system prompt
+SYSTEM """You are a precise and factual AI assistant."""

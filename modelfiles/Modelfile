@@ -1,0 +1,19 @@
+# Use the absolute path to your specific Llama 3 GGUF file
+FROM /home/username/projects/models/Meta-Llama-3-8B-Instruct-Q6_K.gguf
+
+# Set a default system prompt tailored for Llama 3 Instruct
+# Llama 3 was trained with this specific format
+TEMPLATE """<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+
+{{ .System }}<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+{{ .Prompt }}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+{{ .Response }}<|eot_id|>"""
+
+# Set the default parameters for reproducibility and a large context
+PARAMETER num_ctx 8192
+PARAMETER temperature 0.1
+PARAMETER top_p 0.9
+PARAMETER seed 42
+PARAMETER num_batch 512
