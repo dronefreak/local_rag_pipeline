@@ -80,6 +80,22 @@ ollama run llama3:8b # Or 'ollama run mixtral'
     ```
 4.  The first time you run it, the script will build the vector database. This may take some time, especially if you have many PDFs requiring OCR. Subsequent runs will be much faster.
 
+## Project structure
+
+```
+├── src
+│   ├── chains.py
+│   ├── data_ingestion.py
+│   ├── rag.py
+│   └── utils.py
+```
+
+- [configs/rag_pipeline.yaml](configs/rag_pipeline.yaml): In this YAML file you can set the desired parameters for the base LLM model, specify data paths etc.
+- [src/chains.py](src/chains.py): The file that contains the chains required for the RAG pipeline.
+- [src/data_ingestion.py](src/data_ingestion.py): The file that contains the `create_vector_store` function and its helper functions.
+- [src/rag.py](src/rag.py): Main executable for the project.
+- [src/utils.py](src/utils.py): Some utility functions required and used in this project.
+
 ---
 
 If you like this project, leave a star so and please feel free to point out issues and open up discussions on what could be improved/changed or done better in this project.
