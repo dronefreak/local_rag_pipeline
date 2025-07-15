@@ -9,15 +9,22 @@ from langchain.load import dumps, loads
 # from langchain_experimental.text_splitter import SemanticChunker
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
-from langchain_community.document_loaders import CSVLoader, PyMuPDFLoader, TextLoader
+from langchain_community.document_loaders import (
+    CSVLoader,
+    PyMuPDFLoader,
+    TextLoader,
+    UnstructuredPDFLoader,
+)
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
-# from src.utils import get_rich_console
+from src.utils import get_rich_console
 
 
 # The worker function now also handles the splitting.
-def process_and_split_file(file_path, doc_metadata, text_splitter):
+def process_and_split_file(
+    file_path, doc_metadata, text_splitter, config, console=get_rich_console()
+):
     """Worker function to load a single file, process its content, and then split it
     into chunks.
 
@@ -26,16 +33,22 @@ def process_and_split_file(file_path, doc_metadata, text_splitter):
     try:
         # Step 1: Load the full document based on its type
         if file_path.endswith(".pdf"):
-            # "hi_res" strategy is computationally intensive but provides
-            # the best results for datasheets by understanding layout,
-            # tables, and embedded objects.
-            # loader = UnstructuredPDFLoader(
-            #     file_path,
-            #     mode="single",
-            #     # strategy="hi_res",
-            #     infer_table_structure=True # This is key: converts tables to HTML
-            # )
-            loader = PyMuPDFLoader(file_path)
+            if config.pdf_parsing.library == "unstructured":
+                # Use UnstructuredPDFLoader with high-resolution strategy
+                loader = UnstructuredPDFLoader(
+                    file_path,
+                    mode=config.pdf_parsing.mode,  # "single" or "elements"
+                    strategy=config.pdf_parsing.strategy,  # "hi_res" or "low_res"
+                    infer_table_structure=config.pdf_parsing.infer_table_structure,
+                    extract_images=config.pdf_parsing.extract_images,
+                )
+            else:
+                # Fallback to PyMuPDFLoader if Unstructured is not used
+                # Note: PyMuPDFLoader is generally faster but less accurate
+                # for complex layouts. It does not support high-resolution
+                # strategies like Unstructured.
+                loader = PyMuPDFLoader(file_path)
+            # Load the document
             docs = loader.load()
         elif file_path.endswith(".txt"):
             loader = TextLoader(file_path, encoding="utf-8")
@@ -58,7 +71,10 @@ def process_and_split_file(file_path, doc_metadata, text_splitter):
         return chunked_docs
     except Exception as e:
         # Log the error with the specific file that caused it
-        print(f"\nError processing file {os.path.basename(file_path)}: {e}")
+        console.print(
+            f"\nError processing file {os.path.basename(file_path)}: {e}",
+            style="danger",
+        )
         return []
 
 
@@ -114,10 +130,14 @@ def create_vector_store(config, console):
             "[green]Chunking documents...", total=len(files_to_process)
         )
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=config.concurrency
+        ) as executor:
             # We pass the splitter instance to each worker
             future_to_chunks = {
-                executor.submit(process_and_split_file, path, meta, text_splitter): path
+                executor.submit(
+                    process_and_split_file, path, meta, text_splitter, config
+                ): path
                 for path, meta in files_to_process
             }
 
