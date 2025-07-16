@@ -16,7 +16,7 @@ device: cuda # or cpu, depending on your hardware
 concurrency: 8 # Number of concurrent workers for data ingestion
 pdf_parsing:
   library: unstructured # or pymupdf, depending on your preference
-  mode: elements # or multi, depending on your PDF structure
+  mode: single # or multi, depending on your PDF structure
   strategy: hi_res # or low_res, depending on your needs
   infer_table_structure: true # or false, depending on your PDF content
   extract_images: false # or true, depending on whether you want to extract images

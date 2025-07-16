@@ -16,6 +16,8 @@ from langchain_community.document_loaders import (
     UnstructuredPDFLoader,
 )
 from langchain_community.embeddings import HuggingFaceEmbeddings
+
+# from langchain_community.vectorstores.utils import filter_complex_metadata
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from src.utils import get_rich_console
@@ -153,6 +155,8 @@ def create_vector_store(config, console):
         )
         return None
 
+    console.print("Filtering complex metadata from document chunks...")
+    # final_chunks = filter_complex_metadata(all_chunked_texts)
     # 3. Embed and Store the final list of chunks
     console.print(f"\nEmbedding {len(all_chunked_texts)} total text chunks...")
     embeddings = HuggingFaceEmbeddings(
@@ -160,7 +164,7 @@ def create_vector_store(config, console):
     )
 
     db = Chroma.from_documents(
-        documents=all_chunked_texts,  # We now use the final list of chunks
+        documents=all_chunked_texts,
         embedding=embeddings,
         persist_directory=config.vectorstore_path,
     )
