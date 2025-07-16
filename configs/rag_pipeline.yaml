@@ -11,8 +11,15 @@ defaults: # these are the sub-config files for specific details, noee for the mo
 
 dataset_path: data
 vectorstore_path: vectorstore
-embedding_model: BAAI/bge-large-en-v1.5 # Use sentence-transformers/all-MiniLM-L6-v2 for speed
+embedding_model: sentence-transformers/all-MiniLM-L6-v2 # Use BAAI/bge-large-en-v1.5 for higher accuracy
 device: cuda # or cpu, depending on your hardware
+concurrency: 8 # Number of concurrent workers for data ingestion
+pdf_parsing:
+  library: unstructured # or pymupdf, depending on your preference
+  mode: single # or multi, depending on your PDF structure
+  strategy: hi_res # or low_res, depending on your needs
+  infer_table_structure: true # or false, depending on your PDF content
+  extract_images: false # or true, depending on whether you want to extract images
 model:
   name: llama3-8b-q6k
   type: llama
@@ -25,4 +32,4 @@ model:
   seed: 42
 recursive_text_splitter:
   chunk_size: 512
-  chunk_overlap: 100
+  chunk_overlap: 150
