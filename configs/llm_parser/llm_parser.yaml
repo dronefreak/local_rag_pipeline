@@ -1,0 +1,5 @@
+save_imgs: true
+imgs_dir: ocr_images
+output_json: summaries.json
+output_markdown_dir: summaries_md
+tesseract_languages: eng+fra+spa+de+ita+por

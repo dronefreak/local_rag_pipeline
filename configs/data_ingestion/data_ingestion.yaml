@@ -1,0 +1,21 @@
+enabled: true # Set to false if you want to disable data ingestion
+file_priority_order: [".md", ".json", ".txt", "pdf", ".csv"] #
+max_file_size_mb: 100 # Maximum file size in MB for ingestion
+parallel_loading: true # Enable parallel loading of files
+max_workers: 8 # Number of workers for parallel loading
+batch_size: 128 # Number of files to process in each batch
+recursive_text_splitter:
+  chunk_size: 512
+  chunk_overlap: 150
+parent_splitter:
+  chunk_size: 2048 # Large chunks for providing rich context to the LLM
+  chunk_overlap: 512
+child_splitter:
+  chunk_size: 400 # Small, specific chunks for precise vector searching
+  chunk_overlap: 100
+pdf_parsing:
+  library: unstructured # or pymupdf, depending on your preference
+  mode: single # or multi, depending on your PDF structure
+  strategy: hi_res # or low_res, depending on your needs
+  infer_table_structure: true # or false, depending on your PDF content
+  extract_images: false # or true, depending on whether you want to extract images

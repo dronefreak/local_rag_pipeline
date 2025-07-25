@@ -96,7 +96,7 @@ def run_rag_pipeline(config: DictConfig):
 
     # Set up the retriever. This function handles both building the vector store
     # from scratch and loading it from disk if it already exists.
-    retriever = setup_retriever(config, console)
+    retriever = setup_retriever(config)
     if not retriever:
         console.print("!!! Failed to setup retriever. Exiting. !!!", style="bold red")
         return
@@ -151,7 +151,7 @@ def run_rag_pipeline(config: DictConfig):
 
     # --- Main Interactive Chat Loop ---
     console.print("\n--- RAG Assistant is Ready ---", style="bold magenta")
-    console.print("Ask complex questions about your documents. Type 'exit' to quit.")
+    console.print("Ask questions about your documents. Type 'exit' to quit.")
     console.print("-" * 75, style="magenta")
 
     while True:
