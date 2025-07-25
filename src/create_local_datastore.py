@@ -1,17 +1,18 @@
 # src/data_ingestion.py
-"""
-Handles all data ingestion, processing, and vector store management.
+"""Handles all data ingestion, processing, and vector store management.
 
-This module is responsible for discovering files, loading them into memory,
-processing their content using a parent-document retrieval strategy, and
-persisting the resulting vector store and document store to disk for
-efficient reuse. It uses parallel processing to speed up file loading.
+This module is responsible for discovering files, loading them into memory, processing
+their content using a parent-document retrieval strategy, and persisting the resulting
+vector store and document store to disk for efficient reuse. It uses parallel processing
+to speed up file loading.
 """
-
 import concurrent.futures
 import pickle
+import sys
 import uuid
 from pathlib import Path
+
+import hydra
 
 # LangChain and ChromaDB Imports for core RAG components
 from langchain.retrievers import ParentDocumentRetriever
@@ -25,14 +26,16 @@ from langchain_community.document_loaders import (
 )
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from omegaconf import DictConfig, OmegaConf
 
 # Rich library for enhanced console output
 from rich.progress import Progress
 
+from src.utils import RichConsoleManager
+
 
 def process_file_for_loading(file_path: Path, config):
-    """
-    Loads a single file from disk into a LangChain Document object.
+    """Loads a single file from disk into a LangChain Document object.
 
     This function acts as a worker for parallel processing. It inspects the
     file's extension and uses the appropriate loader as defined in the Hydra
@@ -49,7 +52,8 @@ def process_file_for_loading(file_path: Path, config):
     try:
         # Check the file extension to determine the correct loader.
         if file_path.suffix == ".pdf":
-            # Use the PDF parsing library specified in the config (e.g., 'unstructured' or 'pymupdf').
+            # Use the PDF parsing library specified in the config
+            # (e.g., 'unstructured' or 'pymupdf').
             strategy = config.pdf_parsing.library
             if strategy == "unstructured":
                 loader = UnstructuredPDFLoader(
@@ -72,18 +76,20 @@ def process_file_for_loading(file_path: Path, config):
         return []
 
 
-def setup_retriever(config, console):
-    """
-    Sets up the ParentDocumentRetriever, orchestrating the entire data ingestion process.
+@hydra.main(version_base=None, config_path="../configs", config_name="rag_pipeline")
+def setup_retriever(config: DictConfig):
+    """Sets up the ParentDocumentRetriever, orchestrating the entire data ingestion
+    process.
 
     This function is the main entry point for data handling. It checks if a
     persisted document store (`docstore`) exists.
     - If it doesn't, it builds the entire database from scratch by:
         1. Discovering all files in the source data directory.
         2. Loading their content in parallel using worker threads.
-        3. Splitting the documents into large "parent" chunks and small "child" chunks.
-        4. Storing the parent documents in a docstore and embedding/indexing the child chunks
-           in a ChromaDB vector store.
+        3. Splitting the documents into large "parent" chunks and
+           small "child" chunks.
+        4. Storing the parent documents in a docstore and embedding/indexing
+           the child chunks in a ChromaDB vector store.
         5. Persisting the populated docstore and vectorstore to disk.
     - If the docstore exists, it loads the persisted stores from disk to ensure
       fast startup times on subsequent runs.
@@ -95,6 +101,10 @@ def setup_retriever(config, console):
     Returns:
         ParentDocumentRetriever: A fully configured retriever instance ready for use.
     """
+    # Initialize a Rich console for clean and styled terminal output.
+    console = RichConsoleManager.get_console()
+    # Print the full configuration for the current run for reproducibility.
+    console.print(OmegaConf.to_yaml(config), style="warning")
     # Define paths using pathlib for robust, cross-platform path management.
     vectorstore_path = Path(config.vectorstore_path)
     docstore_path = Path(config.docstore_path)
@@ -113,10 +123,11 @@ def setup_retriever(config, console):
         # --- Step 1: Discover and Load all documents in parallel ---
         root_data_path = Path(config.dataset_path)
         # Recursively find all files in the data directory.
-        files_to_process = [p for p in root_data_path.rglob('*') if p.is_file()]
-        
+        files_to_process = [p for p in root_data_path.rglob("*") if p.is_file()]
+
         all_loaded_docs = []
-        # Use Rich's Progress for a clean, visual progress bar during the slow loading phase.
+        # Use Rich's Progress for a clean, visual progress bar
+        # during the slow loading phase.
         with Progress(console=console) as progress:
             task = progress.add_task(
                 "[green]Loading documents...", total=len(files_to_process)
@@ -147,7 +158,8 @@ def setup_retriever(config, console):
 
         # --- Step 2: Manually perform the Parent/Child Splitting ---
         console.print("--- Splitting documents into parent/child chunks... ---")
-        # The parent splitter creates large chunks that provide rich context for the LLM.
+        # The parent splitter creates large chunks that provide
+        # rich context for the LLM.
         parent_splitter = RecursiveCharacterTextSplitter(
             chunk_size=config.parent_splitter.chunk_size
         )
@@ -183,10 +195,11 @@ def setup_retriever(config, console):
             persist_directory=str(vectorstore_path),
         )
 
-        # --- Step 4: Add child documents to the vector store in batches for scalability ---
+        # --- Step 4: Add child documents to the vector store in
+        # batches for scalability ---
         batch_size = config.data_ingestion.batch_size
         console.print(
-            f"--- Adding {len(child_documents)} child chunks to ChromaDB in batches of {batch_size}... ---"
+            f"--- Adding {len(child_documents)} child chunks to ChromaDB... ---"
         )
         with Progress(console=console) as progress:
             task = progress.add_task(
@@ -210,7 +223,7 @@ def setup_retriever(config, console):
     # --- Loading logic for subsequent runs ---
     else:
         console.print(
-            f"--- Found existing vector store and docstore. Loading... ---",
+            "--- Found existing vector store and docstore. Loading... ---",
             style="bold green",
         )
         # Load the persisted parent documents.
@@ -218,7 +231,7 @@ def setup_retriever(config, console):
             store = pickle.load(f)
         docstore = InMemoryStore()
         docstore.store = store
-        
+
         # Load the persisted vector store of child documents.
         vectorstore = Chroma(
             collection_name="parent_document_retriever",
@@ -244,3 +257,14 @@ def setup_retriever(config, console):
     )
 
     return retriever
+
+
+if __name__ == "__main__":
+    # Standard entry point for the script.
+    # The following lines are a workaround for Hydra's default behavior of
+    # creating new output directories on each run. This keeps the project clean.
+    research_dir = Path(__file__).resolve().parent
+    sys.argv.append(f"hydra.run.dir={research_dir}")
+    sys.argv.append("hydra.output_subdir=null")
+    # This call executes the main function, with Hydra handling the config injection.
+    setup_retriever()

@@ -1,17 +1,15 @@
 # src/rag.py
-"""
-The main entry point and orchestration logic for the RAG pipeline.
+"""The main entry point and orchestration logic for the RAG pipeline.
 
-This script uses Hydra for configuration management and orchestrates the entire
-process, including data ingestion, retriever setup, RAG Fusion, and the
-interactive user chat loop.
+This script uses Hydra for configuration management and orchestrates the entire process,
+including data ingestion, retriever setup, RAG Fusion, and the interactive user chat
+loop.
 """
 
 import sys
 from pathlib import Path
 
 import hydra
-from omegaconf import DictConfig, OmegaConf
 
 # LangChain Imports for building the RAG chain and interacting with the LLM
 from langchain.load import dumps, loads
@@ -19,16 +17,16 @@ from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_ollama import ChatOllama
+from omegaconf import DictConfig, OmegaConf
 
 # Local module imports for different pipeline components
 from src.chains import get_final_formatter_chain
-from src.data_ingestion import setup_retriever
+from src.create_local_datastore import setup_retriever
 from src.utils import RichConsoleManager
 
 
 def reciprocal_rank_fusion(results: list[list], k=60):
-    """
-    Applies the Reciprocal Rank Fusion (RRF) algorithm to a list of search results.
+    """Applies the Reciprocal Rank Fusion (RRF) algorithm to a list of search results.
 
     RRF is a method for combining multiple ranked lists of documents into a single,
     more robust ranking. It gives a higher score to documents that appear
@@ -55,7 +53,7 @@ def reciprocal_rank_fusion(results: list[list], k=60):
                 fused_scores[doc_str] = 0
             # Add the RRF score to the document's total score.
             fused_scores[doc_str] += 1 / (rank + k)
-    
+
     # Sort the documents based on their final fused scores in descending order.
     reranked_results = [
         loads(doc)
@@ -66,8 +64,7 @@ def reciprocal_rank_fusion(results: list[list], k=60):
 
 @hydra.main(version_base=None, config_path="../configs", config_name="rag_pipeline")
 def run_rag_pipeline(config: DictConfig):
-    """
-    The main function that orchestrates the entire RAG pipeline.
+    """The main function that orchestrates the entire RAG pipeline.
 
     This function is decorated with Hydra's `@hydra.main`, which automatically
     loads the configuration from the YAML file specified in `config_path` and
@@ -107,14 +104,16 @@ def run_rag_pipeline(config: DictConfig):
     # --- RAG Fusion and QA Chain Implementation ---
     # Define the prompt for the query generator, which creates multiple perspectives
     # on the user's original question to improve retrieval diversity.
-    query_gen_template = f"""You are a helpful assistant that generates multiple search queries based on a single input query.
-    Generate {config.rag_fusion.generated_query_count} other queries that are similar to the original one.
-    The queries should be diverse and cover different aspects or phrasings of the original question.
+    query_gen_template = f"""You are a helpful assistant that generates multiple search
+    queries based on a single input query.
+    Generate {config.rag_fusion.generated_query_count}
+    other queries that are similar to the original one. The queries should be diverse
+    and cover different aspects or phrasings of the original question.
     Provide ONLY the queries, separated by newlines.
     Original Query: {{question}}
     Generated Queries:"""
     query_gen_prompt = PromptTemplate.from_template(query_gen_template)
-    
+
     # The query generator chain pipes the prompt to the LLM and then splits the output
     # into a list of separate query strings.
     query_generator = (
@@ -165,7 +164,8 @@ def run_rag_pipeline(config: DictConfig):
             break
 
         try:
-            # Use Rich's status indicator for a better user experience during processing.
+            # Use Rich's status indicator for a better user
+            # experience during processing.
             with console.status("[bold green]Thinking...[/bold green]"):
                 # Invoke the main RAG chain to get the raw answer.
                 raw_answer = rag_chain_for_raw_answer.invoke(query)
