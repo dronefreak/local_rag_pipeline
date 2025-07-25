@@ -6,6 +6,7 @@ including data ingestion, retriever setup, RAG Fusion, and the interactive user 
 loop.
 """
 
+import logging
 import sys
 from pathlib import Path
 
@@ -80,6 +81,10 @@ def run_rag_pipeline(config: DictConfig):
         config (DictConfig): The configuration object provided by Hydra,
                              containing all settings for the pipeline.
     """
+    # Get the logger for the httpx library
+    httpx_logger = logging.getLogger("httpx")
+    # Set its level to WARNING to hide INFO messages about successful HTTP requests.
+    httpx_logger.setLevel(logging.WARNING)
     # Initialize a Rich console for clean and styled terminal output.
     console = RichConsoleManager.get_console()
     # Print the full configuration for the current run for reproducibility.
@@ -166,15 +171,30 @@ def run_rag_pipeline(config: DictConfig):
         try:
             # Use Rich's status indicator for a better user
             # experience during processing.
-            with console.status("[bold green]Thinking...[/bold green]"):
-                # Invoke the main RAG chain to get the raw answer.
-                raw_answer = rag_chain_for_raw_answer.invoke(query)
+            if config.rag_fusion.stream_final_answer:
+                # The spinner is not needed as the user gets immediate feedback.
+                console.print("\nAssistant:", style="bold green")
 
-                # Invoke the formatter chain to polish the answer for the user.
-                final_answer = final_formatter_chain.invoke({"raw_answer": raw_answer})
+                # Using the .stream() method to get a generator of output chunks.
+                # We iterate through the generator and print each chunk as it arrives.
+                for chunk in rag_chain_for_raw_answer.stream(query):
+                    # Print the chunk to the console without a newline.
+                    console.print(chunk, end="", style="bold green")
 
-            console.print("\nAssistant:", style="bold green")
-            console.print(final_answer)
+                # Print a final newline to clean up the output.
+                console.print()
+            else:
+                with console.status("[bold green]Thinking...[/bold green]"):
+                    # Invoke the main RAG chain to get the raw answer.
+                    raw_answer = rag_chain_for_raw_answer.invoke(query)
+
+                    # Invoke the formatter chain to polish the answer for the user.
+                    final_answer = final_formatter_chain.invoke(
+                        {"raw_answer": raw_answer}
+                    )
+
+                console.print("\nAssistant:", style="bold green")
+                console.print(final_answer)
         except Exception as e:
             # Catch and display any errors that occur during the process.
             console.print(f"An error occurred: {e}", style="bold red")

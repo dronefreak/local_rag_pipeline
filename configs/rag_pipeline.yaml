@@ -23,3 +23,4 @@ rag_fusion:
   fusion_strategy: weighted_average # or max, depending on your preference
   fusion_threshold: 0.5 # Threshold for fusion, adjust based on your data quality
   generated_query_count: 5 # Number of queries to generate for each input
+  stream_final_answer: true

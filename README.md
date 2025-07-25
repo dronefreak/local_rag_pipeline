@@ -2,22 +2,6 @@
 
 Welcome to the **Local RAG Fusion AI Assistant**, a powerful, private, and highly advanced retrieval-augmented generation (RAG) pipeline that runs entirely on your local machine. This is a realtively simple Q&A bot but a few sophisticated implementations for for data ingestion, retrieval, and response generation allow for versatile use cases.
 
-## Project structure
-
-```
-├── src
-│   ├── chains.py
-│   ├── data_ingestion.py
-│   ├── rag.py
-│   └── utils.py
-```
-
-- [configs/rag_pipeline.yaml](configs/rag_pipeline.yaml): In this YAML file you can set the desired parameters for the base LLM model, specify data paths etc.
-- [src/chains.py](src/chains.py): The file that contains the chains required for the RAG pipeline.
-- [src/data_ingestion.py](src/data_ingestion.py): The file that contains the `create_vector_store` function and its helper functions.
-- [src/rag.py](src/rag.py): Main executable for the project.
-- [src/utils.py](src/utils.py): Some utility functions required and used in this project.
-
 ## Setup and Installation
 
 Follow these steps to get your own local AI assistant up and running!
@@ -72,11 +56,27 @@ ollama run llama3 # Or 'ollama run mistral'
     Please note that you can also create your custom ollama servings using a `Modelfile` that uses a local downloaded .gguf model. Look under the `modelfiles` folder for more information.
 2.  **Run the application:**
     ```bash
-    python src/rag.py model.name=llama3 model.type=llama
+    python src/rag.py model.name=llama3.2:3b model.type=llama
     ```
-3.  Please check the `configs/rag_pipeline.yaml` for more configurable parameters.
+3.  Please check the `configs/rag_pipeline.yaml` and other YAML files in the project for more configurable parameters.
 
 The first time you run it, the script will build the vector database. This may take some time, especially if you have many PDFs with tables inside. Subsequent runs will be much faster.
+
+**Important Note**
+
+If you want, you can pre-create a vector store and datastore by simply running the following command:
+
+```
+python src/create_local_datastore.py vectorstore_path=vectorstore docstore_path=docstore.pkl dataset_path=data
+```
+
+Since pre-processing PDFs can be time consuming and tricky if the PDF contains scanned pages, perhaps it is better to pre-process the data using `llm-parser.py` by simply running the following command:
+
+```
+python src/llm_parser.py model.name=llama3.2:3 dataset_path=data
+```
+
+Make sure your dataset paths are correctly inside the `llm_parser.yaml` config.
 
 ## Usage Example
 
@@ -88,13 +88,7 @@ Ask questions about the provided documents. Type 'exit' to quit.
 ----------------------------------------------------------
 
 You: What is the supply voltage range for the ADXL380 accelerometer?
---- Generating queries and retrieving relevant documents...
---- Searching with 7 queries: ['Here are 4 generated queries that are similar to the original one:', '', 'What is the
-operating voltage range of the ADXL380 accelerometer?', 'Is the ADXL380 accelerometer compatible with a specific
-power supply range?', 'Can I use the ADXL380 accelerometer with any DC power supply or does it have a recommended
-range?', 'What is the minimum and maximum voltage requirement for the ADXL380 accelerometer to function properly?',
-'What is the supply voltage range for the ADXL380 accelerometer?'] ---
---- Formatting final response... ---
+⠹ Thinking...
 
 Assistant: Thank you for your inquiry! According to the information provided by the system, the ADXL380 accelerometer
 operates within a specific power supply range. Specifically, it requires a voltage between 2.25 V and 3.6 V, as
@@ -103,6 +97,8 @@ stated in Table 1 of its data sheet.
 Additionally, this device also utilizes an independent supply voltage (VDDIO) and features an internal low dropout
 regulator that can be bypassed if needed. If you have any further questions or concerns regarding the power
 requirements for this accelerometer, please feel free to ask!
+
+
 You: exit
 Assistant: Goodbye!
 ```
@@ -110,6 +106,26 @@ Assistant: Goodbye!
 This is an example created using the datasheet of ADXL380 accelerometer, if you want you can do the same process with other specific documents as well.
 
 ---
+
+## Project structure
+
+```
+├── src
+│   ├── chains.py
+│   ├── data_ingestion.py
+│   ├── rag.py
+│   └── utils.py
+```
+
+- [configs/rag_pipeline.yaml](configs/rag_pipeline.yaml): In this YAML file you can set the desired parameters for the base LLM model, specify data paths etc.
+- [configs/data_ingestion/data_ingestion.yaml](configs/data_ingestion/data_ingestion.yaml): In this YAML file you can set the desired parameters for the creation of local databases.
+- [configs/data_ingestion/llm_parser.yaml](configs/data_ingestion/llm_parser.yaml): In this YAML file you can set the desired parameters for the `llm_parser.py` script.
+- [configs/data_ingestion/model.yaml](configs/data_ingestion/model.yaml): In this YAML file you can set the desired parameters for the base LLM model.
+- [src/chains.py](src/chains.py): The file that contains the chains required for the RAG pipeline.
+- [src/create_local_datastore.py](src/create_local_datastore.py): The file that contains the `create_vector_store` function and its helper functions.
+- [src/rag.py](src/rag.py): Main executable for the project.
+- [src/utils.py](src/utils.py): Some utility functions required and used in this project.
+- [src/llm_parser.py](src/llm_parser.py): An independent parsing technique using OCR + LLMs for a variety of file types.
 
 If you like this project, leave a star so and please feel free to point out issues and open up discussions on what could be improved/changed or done better in this project.
 
