@@ -1,49 +1,92 @@
-import os
+# src/rag.py
+"""The main entry point and orchestration logic for the RAG pipeline.
+
+This script uses Hydra for configuration management and orchestrates the entire process,
+including data ingestion, retriever setup, RAG Fusion, and the interactive user chat
+loop.
+"""
+
 import sys
 from pathlib import Path
 
 import hydra
 
-# --- Core LangChain and RAG Imports ---
+# LangChain Imports for building the RAG chain and interacting with the LLM
+from langchain.load import dumps, loads
 from langchain.prompts import PromptTemplate
-from langchain_chroma import Chroma
-from langchain_community.chat_models import ChatOllama
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_ollama import ChatOllama
 from omegaconf import DictConfig, OmegaConf
 
+# Local module imports for different pipeline components
 from src.chains import get_final_formatter_chain
-from src.data_ingestion import create_vector_store, reciprocal_rank_fusion
-from src.utils import get_rich_console
+from src.create_local_datastore import setup_retriever
+from src.utils import RichConsoleManager
+
+
+def reciprocal_rank_fusion(results: list[list], k=60):
+    """Applies the Reciprocal Rank Fusion (RRF) algorithm to a list of search results.
+
+    RRF is a method for combining multiple ranked lists of documents into a single,
+    more robust ranking. It gives a higher score to documents that appear
+    frequently and in high ranks across the different result sets.
+
+    Args:
+        results (list[list]): A list where each element is a ranked list of
+                               LangChain Document objects from a retriever.
+        k (int): A constant used in the RRF formula to control the influence
+                 of lower-ranked documents. Defaults to 60.
+
+    Returns:
+        list: A single, re-ranked list of LangChain Document objects.
+    """
+    # Dictionary to store the fused scores for each unique document.
+    fused_scores = {}
+    # Iterate through each list of retrieved documents.
+    for docs in results:
+        # Iterate through each document in the list, with its rank.
+        for rank, doc in enumerate(docs):
+            # Serialize the document object to use it as a dictionary key.
+            doc_str = dumps(doc)
+            if doc_str not in fused_scores:
+                fused_scores[doc_str] = 0
+            # Add the RRF score to the document's total score.
+            fused_scores[doc_str] += 1 / (rank + k)
+
+    # Sort the documents based on their final fused scores in descending order.
+    reranked_results = [
+        loads(doc)
+        for doc, score in sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
+    ]
+    return reranked_results
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="rag_pipeline")
 def run_rag_pipeline(config: DictConfig):
-    """Run the main RAG pipeline. This pipeline runs the selected RAG fusion model on
-    the provided queries and documents, retrieves relevant information, and formats the
-    final answer using the specified LLM and output parser.
+    """The main function that orchestrates the entire RAG pipeline.
 
-    Parameters
-    ----------
-    config : DictConfig
-        Hydra configuration containing all the parameters to be used for the pipeline
+    This function is decorated with Hydra's `@hydra.main`, which automatically
+    loads the configuration from the YAML file specified in `config_path` and
+    `config_name` and passes it as a `DictConfig` object.
+
+    The pipeline performs the following steps:
+    1. Initializes the console, LLM, and retriever.
+    2. Constructs the RAG Fusion chain for advanced document retrieval.
+    3. Constructs the final question-answering and formatting chains.
+    4. Enters an interactive chat loop to process user queries.
+
+    Args:
+        config (DictConfig): The configuration object provided by Hydra,
+                             containing all settings for the pipeline.
     """
-    console = get_rich_console()
+    # Initialize a Rich console for clean and styled terminal output.
+    console = RichConsoleManager.get_console()
+    # Print the full configuration for the current run for reproducibility.
     console.print(OmegaConf.to_yaml(config), style="warning")
-    console.print("\n--- Advanced RAG Fusion Assistant ---", style="info")
-    console.print("Loading documents and initializing vector store...\n", style="info")
-    embeddings = HuggingFaceEmbeddings(
-        model_name=config.embedding_model, model_kwargs={"device": config.device}
-    )
-    if not os.path.exists(config.vectorstore_path):
-        create_vector_store(config, console=console)
-    console.print("--- Loading existing Chroma vector store... ---")
-    db = Chroma(
-        persist_directory=config.vectorstore_path, embedding_function=embeddings
-    )
-    retriever = db.as_retriever()
 
+    # --- Setup Phase ---
+    # Initialize the Language Model (LLM) from Ollama with parameters from the config.
     llm = ChatOllama(
         model=config.model.name,
         temperature=config.model.temperature,
@@ -51,21 +94,38 @@ def run_rag_pipeline(config: DictConfig):
         seed=config.model.seed,
     )
 
-    # --- RAG Fusion Implementation ---
-    query_gen_template = """You are a helpful assistant that generates multiple
-    search queries based on a single input query.
-    Generate 4 other queries that are similar to the original one.
-    The queries should be diverse and cover different aspects or phrasings
-    of the original question. Provide ONLY the queries, separated by newlines.
-    Original Query: {question}
+    # Set up the retriever. This function handles both building the vector store
+    # from scratch and loading it from disk if it already exists.
+    retriever = setup_retriever(config, console)
+    if not retriever:
+        console.print("!!! Failed to setup retriever. Exiting. !!!", style="bold red")
+        return
+
+    # --- RAG Fusion and QA Chain Implementation ---
+    # Define the prompt for the query generator, which creates multiple perspectives
+    # on the user's original question to improve retrieval diversity.
+    query_gen_template = f"""You are a helpful assistant that generates multiple search
+    queries based on a single input query.
+    Generate {config.rag_fusion.generated_query_count}
+    other queries that are similar to the original one. The queries should be diverse
+    and cover different aspects or phrasings of the original question.
+    Provide ONLY the queries, separated by newlines.
+    Original Query: {{question}}
     Generated Queries:"""
     query_gen_prompt = PromptTemplate.from_template(query_gen_template)
+
+    # The query generator chain pipes the prompt to the LLM and then splits the output
+    # into a list of separate query strings.
     query_generator = (
-        query_gen_prompt | llm | StrOutputParser() | (lambda x: x.split("\n"))
+        query_gen_prompt | llm | StrOutputParser() | (lambda x: x.strip().split("\n"))
     )
 
+    # The RAG Fusion chain combines the query generator, parallel retrieval, and RRF.
+    # retriever.map() runs the retriever for each generated query in parallel.
     fusion_chain = query_generator | retriever.map() | reciprocal_rank_fusion
 
+    # Define the prompt for the final question-answering step, which takes the
+    # retrieved context and the original question to generate a raw answer.
     final_qa_template = """You are a specialist assistant.
     Answer the user's question based ONLY on the following context.
     If the context does not contain the answer, state that you could
@@ -76,7 +136,9 @@ def run_rag_pipeline(config: DictConfig):
     Answer:"""
     final_qa_prompt = PromptTemplate.from_template(final_qa_template)
 
-    # This chain produces the raw, factual answer
+    # This is the final RAG chain that produces the raw, factual answer.
+    # It takes the user's question, passes it to the fusion_chain to get context,
+    # and then passes both to the final QA prompt and LLM.
     rag_chain_for_raw_answer = (
         {"context": fusion_chain, "question": RunnablePassthrough()}
         | final_qa_prompt
@@ -84,61 +146,48 @@ def run_rag_pipeline(config: DictConfig):
         | StrOutputParser()
     )
 
-    # --- Initialize the Final Formatter ---
+    # Initialize the final formatting chain for polishing the output.
     final_formatter_chain = get_final_formatter_chain(llm)
 
-    # --- Main Chat Loop ---
-    console.print("\n--- RAG Fusion Assistant is Ready ---", style="info")
-    console.print("Ask questions about the provided documents. Type 'exit' to quit.")
-    console.print("----------------------------------------------------------\n")
+    # --- Main Interactive Chat Loop ---
+    console.print("\n--- RAG Assistant is Ready ---", style="bold magenta")
+    console.print("Ask complex questions about your documents. Type 'exit' to quit.")
+    console.print("-" * 75, style="magenta")
 
     while True:
         query = input("You: ")
+        # Handle empty input.
         if not query.strip():
             continue
+        # Provide a way to exit the loop.
         if query.lower() in ["exit", "quit"]:
             break
+
         try:
-            console.print(
-                "--- Generating queries and retrieving relevant documents...",
-                style="info",
-            )
+            # Use Rich's status indicator for a better user
+            # experience during processing.
+            with console.status("[bold green]Thinking...[/bold green]"):
+                # Invoke the main RAG chain to get the raw answer.
+                raw_answer = rag_chain_for_raw_answer.invoke(query)
 
-            # 1. Generate alternative queries
-            generated_queries = query_generator.invoke({"question": query})
+                # Invoke the formatter chain to polish the answer for the user.
+                final_answer = final_formatter_chain.invoke({"raw_answer": raw_answer})
 
-            # 2. Add the original query to the list
-            all_queries = generated_queries + [query]
-            console.print(
-                f"--- Searching with {len(all_queries)} queries: {all_queries} ---"
-            )
-
-            # 3. Retrieve documents for all queries in parallel
-            retrieved_docs = retriever.batch(all_queries)
-
-            # 4. Fuse the results
-            fused_docs = reciprocal_rank_fusion(retrieved_docs)
-
-            # 5. Get the raw answer using the fused context
-            raw_answer = rag_chain_for_raw_answer.invoke(
-                {"context": fused_docs, "question": query}
-            )
-
-            # 6. Format the final response
-            console.print("--- Formatting final response... ---")
-            final_answer = final_formatter_chain.invoke({"raw_answer": raw_answer})
-
-            console.print("\nAssistant:", final_answer)
+            console.print("\nAssistant:", style="bold green")
+            console.print(final_answer)
         except Exception as e:
-            console.print(f"An error occurred: {e}", style="danger")
-    console.print("Assistant: Goodbye!", style="info")
+            # Catch and display any errors that occur during the process.
+            console.print(f"An error occurred: {e}", style="bold red")
+
+    console.print("Assistant: Goodbye!", style="bold magenta")
 
 
 if __name__ == "__main__":
-    # This hack is required to prevent hydra from creating output directories.
+    # Standard entry point for the script.
+    # The following lines are a workaround for Hydra's default behavior of
+    # creating new output directories on each run. This keeps the project clean.
     research_dir = Path(__file__).resolve().parent
     sys.argv.append(f"hydra.run.dir={research_dir}")
     sys.argv.append("hydra.output_subdir=null")
-    # Disable Pylint warning about missing parameter, config is passed by Hydra.
-    # pylint: disable=no-value-for-parameter
+    # This call executes the main function, with Hydra handling the config injection.
     run_rag_pipeline()
