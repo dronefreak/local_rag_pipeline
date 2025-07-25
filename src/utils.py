@@ -103,5 +103,7 @@ class RichConsoleManager:
         )
 
 
-def format_docs(docs):
-    return "\n\n---\n\n".join(doc.page_content for doc in docs)
+    def format_docs(docs):
+        """Helper function to format the retrieved documents into a single string."""
+        # We take the top 5 most relevant documents from the fused list for the final context.
+        return "\n\n---\n\n".join(doc.page_content for doc in docs[:5])
