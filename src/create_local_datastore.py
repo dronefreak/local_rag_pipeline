@@ -54,12 +54,12 @@ def process_file_for_loading(file_path: Path, config):
         if file_path.suffix == ".pdf":
             # Use the PDF parsing library specified in the config
             # (e.g., 'unstructured' or 'pymupdf').
-            strategy = config.pdf_parsing.library
+            strategy = config.data_ingestion.pdf_parsing.library
             if strategy == "unstructured":
                 loader = UnstructuredPDFLoader(
                     str(file_path),
-                    mode=config.pdf_parsing.mode,
-                    strategy=config.pdf_parsing.strategy,
+                    mode=config.data_ingestion.pdf_parsing.mode,
+                    strategy=config.data_ingestion.pdf_parsing.strategy,
                 )
             else:  # Default to PyMuPDF for a faster, simpler alternative.
                 loader = PyMuPDFLoader(str(file_path))
@@ -161,11 +161,11 @@ def setup_retriever(config: DictConfig):
         # The parent splitter creates large chunks that provide
         # rich context for the LLM.
         parent_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=config.parent_splitter.chunk_size
+            chunk_size=config.data_ingestion.parent_splitter.chunk_size
         )
         # The child splitter creates small, specific chunks ideal for semantic search.
         child_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=config.child_splitter.chunk_size
+            chunk_size=config.data_ingestion.child_splitter.chunk_size
         )
 
         # Create the large parent documents.
@@ -243,10 +243,10 @@ def setup_retriever(config: DictConfig):
     # The splitters are still required by the retriever's constructor for validation,
     # even when loading from a persisted state.
     parent_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=config.parent_splitter.chunk_size
+        chunk_size=config.data_ingestion.parent_splitter.chunk_size
     )
     child_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=config.child_splitter.chunk_size
+        chunk_size=config.data_ingestion.child_splitter.chunk_size
     )
 
     retriever = ParentDocumentRetriever(

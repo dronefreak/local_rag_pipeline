@@ -8,6 +8,9 @@
 
 defaults: # these are the sub-config files for specific details, noee for the moment.
   - _self_ # this makes the top-level config take priority over sub-configs, see https://hydra.cc/docs/upgrades/1.0_to_1.1/default_composition_order/
+  - model: model
+  - llm_parser: llm_parser
+  - data_ingestion: data_ingestion
 
 dataset_path: data
 vectorstore_path: vectorstore
@@ -15,40 +18,8 @@ docstore_path: docstore.pkl
 collection_name: rag_fusion_collection
 embedding_model: sentence-transformers/all-MiniLM-L6-v2 # Use BAAI/bge-large-en-v1.5 for higher accuracy
 device: cuda # or cpu, depending on your hardware
-data_ingestion:
-  enabled: true # Set to false if you want to disable data ingestion
-  file_priority_order: [".md", ".json", ".txt", "pdf", ".csv"] #
-  max_file_size_mb: 100 # Maximum file size in MB for ingestion
-  parallel_loading: true # Enable parallel loading of files
-  max_workers: 8 # Number of workers for parallel loading
-  batch_size: 128 # Number of files to process in each batch
 rag_fusion:
   enabled: true # Set to false if you want to disable RAG Fusion
   fusion_strategy: weighted_average # or max, depending on your preference
   fusion_threshold: 0.5 # Threshold for fusion, adjust based on your data quality
   generated_query_count: 5 # Number of queries to generate for each input
-pdf_parsing:
-  library: unstructured # or pymupdf, depending on your preference
-  mode: single # or multi, depending on your PDF structure
-  strategy: hi_res # or low_res, depending on your needs
-  infer_table_structure: true # or false, depending on your PDF content
-  extract_images: false # or true, depending on whether you want to extract images
-model:
-  name: llama3-8b-q6k
-  type: llama
-  quantization: q6k # or q4_0, depending on your hardware and model size
-  revision: main # or a specific commit hash if needed
-  temperature: 0.7
-  top_p: 0.95
-  max_new_tokens: 512
-  repetition_penalty: 1.2
-  seed: 42
-recursive_text_splitter:
-  chunk_size: 512
-  chunk_overlap: 150
-parent_splitter:
-  chunk_size: 2048 # Large chunks for providing rich context to the LLM
-  chunk_overlap: 512
-child_splitter:
-  chunk_size: 400 # Small, specific chunks for precise vector searching
-  chunk_overlap: 100
