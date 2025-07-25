@@ -1,5 +1,17 @@
+# src/llm_parser.py
+"""This script performs an advanced, LLM-based parsing of PDF and other document types.
+
+It processes files in a source directory including PDFs, DOCX, PPTX, CSVs, images,
+plain text, HTML, and EPUB, performs OCR (if needed),
+and uses a large language model (LLM) to generate structured summaries.
+
+The output is saved in two formats:
+1. A detailed JSON file containing all results.
+2. Individual Markdown files for each document, providing a human-readable
+   summary with metadata and collapsible sections for the raw extracted text.
+"""
+
 import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -7,30 +19,38 @@ from pathlib import Path
 import cv2
 import hydra
 import numpy as np
+import pandas as pd
 import pytesseract
+from bs4 import BeautifulSoup
+from docx import Document
+from ebooklib import epub
 from langchain.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
 from omegaconf import DictConfig, OmegaConf
 from pdf2image import convert_from_path
+from pptx import Presentation
 from PyPDF2 import PdfReader
-from tqdm import tqdm
 
 from src.utils import RichConsoleManager
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="rag_pipeline")
 def parse_data_with_llms(config: DictConfig):
-    # Initialize a Rich console for clean and styled terminal output.
     console = RichConsoleManager.get_console()
-    # Print the full configuration for the current run for reproducibility.
     console.print(OmegaConf.to_yaml(config), style="warning")
 
-    if config.llm_parser.save_imgs:
-        os.makedirs(config.llm_parser.imgs_dir, exist_ok=True)
-    os.makedirs(config.llm_parser.output_markdown_dir, exist_ok=True)
+    input_folder = Path(config.dataset_path)
+    output_markdown_dir = Path(config.llm_parser.output_markdown_dir)
+    output_json_path = Path(config.llm_parser.output_json)
+    output_markdown_dir.mkdir(exist_ok=True)
 
-    # === LLM Setup ===
-    llm = OllamaLLM(model=config.model.name)  # More multilingual than mistral
+    if config.llm_parser.save_imgs:
+        imgs_dir = Path(config.llm_parser.imgs_dir)
+        imgs_dir.mkdir(exist_ok=True)
+    else:
+        imgs_dir = None
+
+    llm = OllamaLLM(model=config.model.name)
     prompt = PromptTemplate.from_template(
         """
     You are a smart assistant tasked with reading diverse documents, such as:
@@ -70,36 +90,42 @@ def parse_data_with_llms(config: DictConfig):
     )
     runnable = prompt | llm
 
-    # === Summarization Process ===
     summary_results = []
+    supported_exts = [
+        ".pdf",
+        ".docx",
+        ".pptx",
+        ".csv",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".txt",
+        ".html",
+        ".htm",
+        ".epub",
+    ]
 
-    for root, dirs, files in os.walk(config.dataset_path):
-        for filename in files:
-            if not filename.lower().endswith(".pdf"):
-                continue
+    for path in input_folder.rglob("*"):
+        if path.suffix.lower() not in supported_exts:
+            continue
 
-            md_filename = os.path.join(
-                config.llm_parser.output_markdown_dir, f"{filename}.md"
-            )
-            if os.path.exists(md_filename):
-                console.print(f"Skipping {filename} - already processed.", style="info")
-                continue
+        category = path.parent.name
+        md_filename = output_markdown_dir / f"{path.name}.md"
+        if md_filename.exists():
+            console.print(f"Skipping {path.name} - already processed.", style="info")
+            continue
 
-            category = os.path.basename(root)
-            pdf_path = os.path.join(root, filename)
-            console.print(f"\nProcessing: {category}/{filename}", style="info")
-            if config.llm_parser.save_imgs:
-                images = convert_from_path(
-                    pdf_path,
-                    dpi=300,
-                    output_folder=config.llm_parser.imgs_dir,
-                    fmt="png",
-                )
+        console.print(f"\nProcessing: {category}/{path.name}", style="info")
+        doc_summaries = []
+        toc_entries = []
+        metadata = {}
 
-            # Extract metadata from PDF
-            metadata = {}
+        texts = []
+        ext = path.suffix.lower()
+
+        if ext == ".pdf":
             try:
-                reader = PdfReader(pdf_path)
+                reader = PdfReader(path)
                 doc_info = reader.metadata
                 if doc_info:
                     metadata = {
@@ -117,113 +143,139 @@ def parse_data_with_llms(config: DictConfig):
             except Exception as e:
                 metadata = {"error": f"Metadata extraction failed: {e}"}
 
-            doc_summaries = []
-            toc_entries = []
-
-            for i, img in tqdm(enumerate(images)):
+            images = convert_from_path(
+                str(path),
+                dpi=300,
+                output_folder=str(imgs_dir) if imgs_dir else None,
+                fmt="png",
+            )
+            for i, img in enumerate(images):
                 img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-                # --- Orientation and Skew Correction ---
                 try:
-                    # Get orientation data from Tesseract
                     osd = pytesseract.image_to_osd(
                         img_cv, output_type=pytesseract.Output.DICT
                     )
                     rotation = osd["rotate"]
-                    # Rotate the image to the correct orientation
                     if rotation > 0:
-                        console.print(
-                            f"  - Rotating page {i+1} by {rotation} degrees...",
-                            style="warning",
-                        )
                         (h, w) = img_cv.shape[:2]
-                        center = (w // 2, h // 2)
-                        M = cv2.getRotationMatrix2D(center, -rotation, 1.0)
+                        M = cv2.getRotationMatrix2D((w // 2, h // 2), -rotation, 1.0)
                         img_cv = cv2.warpAffine(
-                            img_cv,
-                            M,
-                            (w, h),
-                            flags=cv2.INTER_CUBIC,
-                            borderMode=cv2.BORDER_REPLICATE,
+                            img_cv, M, (w, h), flags=cv2.INTER_CUBIC
                         )
-                except Exception as e:
-                    console.print(
-                        f"  - Could not get orientation for page {i+1}: {e}",
-                        style="info",
-                    )
-                # --- END of Correction ---
-
+                except:
+                    pass
                 gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
                 enhanced = cv2.adaptiveThreshold(
                     gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 35, 15
                 )
-
                 text = pytesseract.image_to_string(
                     enhanced, lang=config.llm_parser.tesseract_languages
                 ).strip()
-                if not text:
-                    continue
+                if text:
+                    texts.append((i + 1, text))
 
-                summary = runnable.invoke(
-                    {
-                        "document_name": filename,
-                        "category": category,
-                        "page_number": i + 1,
-                        "page_text": text,
-                    }
+        elif ext in [".jpg", ".jpeg", ".png"]:
+            img = cv2.imread(str(path))
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            enhanced = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 35, 15
+            )
+            text = pytesseract.image_to_string(
+                enhanced, lang=config.llm_parser.tesseract_languages
+            ).strip()
+            if text:
+                texts.append((1, text))
+
+        elif ext == ".docx":
+            doc = Document(path)
+            text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+            texts.append((1, text))
+
+        elif ext == ".pptx":
+            prs = Presentation(path)
+            slide_text = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        slide_text.append(shape.text)
+            texts.append((1, "\n".join(slide_text)))
+
+        elif ext == ".csv":
+            df = pd.read_csv(path)
+            texts.append((1, df.to_string(index=False)))
+
+        elif ext == ".txt":
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                texts.append((1, f.read()))
+
+        elif ext in [".html", ".htm"]:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                soup = BeautifulSoup(f.read(), "html.parser")
+                texts.append((1, soup.get_text()))
+
+        elif ext == ".epub":
+            try:
+                book = epub.read_epub(str(path))
+                epub_texts = []
+                for doc in book.get_items():
+                    if doc.get_type() == epub.ITEM_DOCUMENT:
+                        soup = BeautifulSoup(doc.get_body_content(), "html.parser")
+                        epub_texts.append(soup.get_text())
+                texts.append((1, "\n".join(epub_texts)))
+            except Exception as e:
+                texts.append((1, f"[EPUB parsing error: {str(e)}]"))
+
+        for page_num, page_text in texts:
+            summary = runnable.invoke(
+                {
+                    "document_name": path.name,
+                    "category": category,
+                    "page_number": page_num,
+                    "page_text": page_text,
+                }
+            )
+            result = {
+                "document": path.name,
+                "category": category,
+                "page": page_num,
+                "summary": summary,
+                "ocr_text": page_text,
+                "metadata": metadata,
+            }
+            summary_results.append(result)
+            doc_summaries.append(result)
+            toc_entries.append(f"- [Page {page_num}](#page-{page_num})")
+
+        with open(md_filename, "w", encoding="utf-8") as f:
+            f.write(f"# Summary for {path.name}\n")
+            f.write(f"_Generated: {datetime.now().isoformat()}\n\n")
+            if metadata:
+                f.write("## Document Metadata\n")
+                for k, v in metadata.items():
+                    if v:
+                        f.write(f"- **{k.capitalize()}**: {v}\n")
+                f.write("\n")
+            f.write("## Table of Contents\n")
+            f.write("\n".join(toc_entries) + "\n\n")
+            for item in doc_summaries:
+                f.write(f"## Page {item['page']}\n\n")
+                f.write(f"**Summary:**\n\n{item['summary']}\n\n")
+                f.write(
+                    "<details><summary>Raw OCR/Text</summary>\n\n"
+                    f" ```{item['ocr_text']}```\n</details>\n\n"
                 )
 
-                result = {
-                    "document": filename,
-                    "category": category,
-                    "page": i + 1,
-                    "summary": summary,
-                    "ocr_text": text,
-                    "metadata": metadata,
-                }
-
-                summary_results.append(result)
-                doc_summaries.append(result)
-                toc_entries.append(f"- [Page {i + 1}](#page-{i + 1})")
-
-            # Save per-document markdown
-            with open(md_filename, "w", encoding="utf-8") as f:
-                f.write(f"# Summary for {filename}\n")
-                f.write(f"_Generated: {datetime.now().isoformat()}\n\n")
-
-                if metadata:
-                    f.write("## Document Metadata\n")
-                    for key, val in metadata.items():
-                        if val:
-                            f.write(f"- **{key.capitalize()}**: {val}\n")
-                    f.write("\n")
-
-                f.write("## Table of Contents\n")
-                f.write("\n".join(toc_entries) + "\n\n")
-
-                for item in doc_summaries:
-                    f.write(f"## Page {item['page']}\n\n")
-                    f.write(f"**Summary:**\n\n{item['summary']}\n\n")
-                    f.write(
-                        f"<details><summary>Raw OCR Text</summary>\n\n"
-                        f" ```{item['ocr_text']}```\n</details>\n\n"
-                    )
-
-    # === Output all to JSON ===
-    with open(config.llm_parser.output_json, "w", encoding="utf-8") as f:
+    with open(output_json_path, "w", encoding="utf-8") as f:
         json.dump(summary_results, f, ensure_ascii=False, indent=2)
 
     console.print(
-        f"\n Markdown summaries saved in `{config.llm_parser.output_markdown_dir}`"
-        f" Full data saved in `{config.llm_parser.output_json}`."
+        f"\n Markdown summaries saved in `{output_markdown_dir}`.\n"
+        f" Full data saved in `{output_json_path}`."
     )
 
 
 if __name__ == "__main__":
-    # Standard entry point for the script.
-    # The following lines are a workaround for Hydra's default behavior of
-    # creating new output directories on each run. This keeps the project clean.
     research_dir = Path(__file__).resolve().parent
     sys.argv.append(f"hydra.run.dir={research_dir}")
     sys.argv.append("hydra.output_subdir=null")
-    # This call executes the main function, with Hydra handling the config injection.
     parse_data_with_llms()
