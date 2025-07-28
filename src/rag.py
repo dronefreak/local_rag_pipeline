@@ -8,6 +8,7 @@ loop.
 
 import logging
 import sys
+import time
 from pathlib import Path
 
 import hydra
@@ -109,12 +110,11 @@ def run_rag_pipeline(config: DictConfig):
     # --- RAG Fusion and QA Chain Implementation ---
     # Define the prompt for the query generator, which creates multiple perspectives
     # on the user's original question to improve retrieval diversity.
-    query_gen_template = f"""You are a helpful assistant that generates multiple search
-    queries based on a single input query.
+    query_gen_template = f"""You are a helpful assistant that
+    generates multiple search queries...
     Generate {config.rag_fusion.generated_query_count}
-    other queries that are similar to the original one. The queries should be diverse
-    and cover different aspects or phrasings of the original question.
-    Provide ONLY the queries, separated by newlines.
+    other queries that are semantically similar to the original
+    question, and return them separated by newlines.
     Original Query: {{question}}
     Generated Queries:"""
     query_gen_prompt = PromptTemplate.from_template(query_gen_template)
@@ -131,11 +131,15 @@ def run_rag_pipeline(config: DictConfig):
 
     # Define the prompt for the final question-answering step, which takes the
     # retrieved context and the original question to generate a raw answer.
-    final_qa_template = """You are a specialist assistant.
-    Answer the user's question based ONLY on the following context.
-    If the context does not contain the answer, state that you could
-    not find the information in the provided documents.
-    Be concise and precise.
+    final_qa_template = """You are a specialist assistant that provides
+    answers based on the context provided. Always try to provide a
+    reference to the document (ex. name of the document, page number etc.)
+    where the answer was found. If the query is phrased to describe some
+    features, elaborate on them, without adding any additional
+    information that is not present in the context.
+    If the context does not contain enough information to answer the
+    question, politely reply that you don't know the answer and that you couldn't
+    find any relevant information in the provided context.
     Context: {context}
     Question: {question}
     Answer:"""
@@ -173,13 +177,14 @@ def run_rag_pipeline(config: DictConfig):
             # experience during processing.
             if config.rag_fusion.stream_final_answer:
                 # The spinner is not needed as the user gets immediate feedback.
-                console.print("\nAssistant:", style="bold green")
+                console.print("Assistant:", style="bold green")
 
                 # Using the .stream() method to get a generator of output chunks.
                 # We iterate through the generator and print each chunk as it arrives.
                 for chunk in rag_chain_for_raw_answer.stream(query):
                     # Print the chunk to the console without a newline.
                     console.print(chunk, end="", style="bold green")
+                    time.sleep(0.1)  # Optional: Add a small delay for better UX
 
                 # Print a final newline to clean up the output.
                 console.print()
@@ -193,7 +198,7 @@ def run_rag_pipeline(config: DictConfig):
                         {"raw_answer": raw_answer}
                     )
 
-                console.print("\nAssistant:", style="bold green")
+                console.print("Assistant:", style="bold green")
                 console.print(final_answer)
         except Exception as e:
             # Catch and display any errors that occur during the process.
