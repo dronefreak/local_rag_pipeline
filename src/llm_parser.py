@@ -40,7 +40,7 @@ def parse_data_with_llms(config: DictConfig):
     console.print(OmegaConf.to_yaml(config), style="warning")
 
     input_folder = Path(config.dataset_path)
-    output_markdown_dir = Path(config.llm_parser.output_markdown_dir)
+    output_markdown_dir = Path(config.dataset_path)
     output_json_path = Path(config.llm_parser.output_json)
     output_markdown_dir.mkdir(exist_ok=True)
 
@@ -110,7 +110,7 @@ def parse_data_with_llms(config: DictConfig):
             continue
 
         category = path.parent.name
-        md_filename = output_markdown_dir / f"{path.name}.md"
+        md_filename = path.parent / f"{path.name}.md"
         if md_filename.exists():
             console.print(f"Skipping {path.name} - already processed.", style="info")
             continue
