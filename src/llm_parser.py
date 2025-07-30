@@ -13,25 +13,19 @@ The output is saved in two formats:
 
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
 
-import cv2
 import hydra
-import numpy as np
-import pandas as pd
-import pytesseract
-from bs4 import BeautifulSoup
-from docx import Document
-from ebooklib import epub
 from langchain.prompts import PromptTemplate
 from langchain_ollama import OllamaLLM
 from omegaconf import DictConfig, OmegaConf
-from pdf2image import convert_from_path
-from pptx import Presentation
-from PyPDF2 import PdfReader
+from rich.progress import track
 
-from src.utils import RichConsoleManager
+from src.utils import (
+    RichConsoleManager,
+    generate_markdown_from_json,
+    process_single_document,
+)
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="rag_pipeline")
@@ -89,8 +83,6 @@ def parse_data_with_llms(config: DictConfig):
     """
     )
     runnable = prompt | llm
-
-    summary_results = []
     supported_exts = [
         ".pdf",
         ".docx",
@@ -105,172 +97,82 @@ def parse_data_with_llms(config: DictConfig):
         ".epub",
     ]
 
-    for path in input_folder.rglob("*"):
-        if path.suffix.lower() not in supported_exts:
-            continue
+    # === Summarization Process ===
+    all_summary_results = []  # We will still collect all results for the final big JSON
 
-        category = path.parent.name
+    # Use pathlib's rglob for recursive file discovery.
+    # We will now use a progress bar from `rich` instead of `tqdm` for consistency
+    files_to_process = [
+        p for p in input_folder.rglob("*") if p.suffix.lower() in supported_exts
+    ]
+
+    # We iterate over files first
+    for path in track(files_to_process, description="Processing all documents..."):
+        json_output_filename = path.parent / f"{path.name}.json"
         md_filename = path.parent / f"{path.name}.md"
-        if md_filename.exists():
-            console.print(f"Skipping {path.name} - already processed.", style="info")
+
+        if json_output_filename.exists():
+            console.print(f"Skipping {path.name} - JSON already exists.", style="info")
+            if not md_filename.exists():
+                generate_markdown_from_json(json_output_filename, md_filename)
             continue
 
-        console.print(f"\nProcessing: {category}/{path.name}", style="info")
-        doc_summaries = []
-        toc_entries = []
-        metadata = {}
+        page_texts, metadata = process_single_document(path, config, console)
 
-        texts = []
-        ext = path.suffix.lower()
-
-        if ext == ".pdf":
-            try:
-                reader = PdfReader(path)
-                doc_info = reader.metadata
-                if doc_info:
-                    metadata = {
-                        "author": doc_info.author,
-                        "creator": doc_info.creator,
-                        "producer": doc_info.producer,
-                        "subject": doc_info.subject,
-                        "title": doc_info.title,
-                        "created": (
-                            str(doc_info.creation_date)
-                            if doc_info.creation_date
-                            else None
-                        ),
-                    }
-            except Exception as e:
-                metadata = {"error": f"Metadata extraction failed: {e}"}
-
-            images = convert_from_path(
-                str(path),
-                dpi=300,
-                output_folder=str(imgs_dir) if imgs_dir else None,
-                fmt="png",
+        if not page_texts:
+            console.print(
+                f"No text extracted from {path.name}. Skipping.", style="warning"
             )
-            for i, img in enumerate(images):
-                img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-                try:
-                    osd = pytesseract.image_to_osd(
-                        img_cv, output_type=pytesseract.Output.DICT
-                    )
-                    rotation = osd["rotate"]
-                    if rotation > 0:
-                        (h, w) = img_cv.shape[:2]
-                        M = cv2.getRotationMatrix2D((w // 2, h // 2), -rotation, 1.0)
-                        img_cv = cv2.warpAffine(
-                            img_cv, M, (w, h), flags=cv2.INTER_CUBIC
-                        )
-                except:
-                    pass
-                gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-                enhanced = cv2.adaptiveThreshold(
-                    gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 35, 15
-                )
-                text = pytesseract.image_to_string(
-                    enhanced, lang=config.llm_parser.tesseract_languages
-                ).strip()
-                if text:
-                    texts.append((i + 1, text))
+            continue
 
-        elif ext in [".jpg", ".jpeg", ".png"]:
-            img = cv2.imread(str(path))
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            enhanced = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 35, 15
+        doc_page_results = []
+        for i in range(0, len(page_texts), config.llm_parser.batch_size):
+            batch = page_texts[i : i + config.llm_parser.batch_size]
+
+            combined_text = "\n\n--- PAGE BREAK ---\n\n".join(
+                [f"Content from Page {p[0]}:\n{p[1]}" for p in batch]
             )
-            text = pytesseract.image_to_string(
-                enhanced, lang=config.llm_parser.tesseract_languages
-            ).strip()
-            if text:
-                texts.append((1, text))
+            page_numbers = ", ".join([str(p[0]) for p in batch])
 
-        elif ext == ".docx":
-            doc = Document(path)
-            text = "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-            texts.append((1, text))
-
-        elif ext == ".pptx":
-            prs = Presentation(path)
-            slide_text = []
-            for slide in prs.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        slide_text.append(shape.text)
-            texts.append((1, "\n".join(slide_text)))
-
-        elif ext == ".csv":
-            df = pd.read_csv(path)
-            texts.append((1, df.to_string(index=False)))
-
-        elif ext == ".txt":
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                texts.append((1, f.read()))
-
-        elif ext in [".html", ".htm"]:
-            with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                soup = BeautifulSoup(f.read(), "html.parser")
-                texts.append((1, soup.get_text()))
-
-        elif ext == ".epub":
-            try:
-                book = epub.read_epub(str(path))
-                epub_texts = []
-                for doc in book.get_items():
-                    if doc.get_type() == epub.ITEM_DOCUMENT:
-                        soup = BeautifulSoup(doc.get_body_content(), "html.parser")
-                        epub_texts.append(soup.get_text())
-                texts.append((1, "\n".join(epub_texts)))
-            except Exception as e:
-                texts.append((1, f"[EPUB parsing error: {str(e)}]"))
-
-        for page_num, page_text in texts:
             summary = runnable.invoke(
                 {
                     "document_name": path.name,
-                    "category": category,
-                    "page_number": page_num,
-                    "page_text": page_text,
+                    "category": path.parent.name,
+                    "page_number": page_numbers,
+                    "page_text": combined_text,
                 }
             )
-            result = {
-                "document": path.name,
-                "category": category,
-                "page": page_num,
-                "summary": summary,
-                "ocr_text": page_text,
-                "metadata": metadata,
-            }
-            summary_results.append(result)
-            doc_summaries.append(result)
-            toc_entries.append(f"- [Page {page_num}](#page-{page_num})")
 
-        with open(md_filename, "w", encoding="utf-8") as f:
-            f.write(f"# Summary for {path.name}\n")
-            f.write(f"_Generated: {datetime.now().isoformat()}\n\n")
-            if metadata:
-                f.write("## Document Metadata\n")
-                for k, v in metadata.items():
-                    if v:
-                        f.write(f"- **{k.capitalize()}**: {v}\n")
-                f.write("\n")
-            f.write("## Table of Contents\n")
-            f.write("\n".join(toc_entries) + "\n\n")
-            for item in doc_summaries:
-                f.write(f"## Page {item['page']}\n\n")
-                f.write(f"**Summary:**\n\n{item['summary']}\n\n")
-                f.write(
-                    "<details><summary>Raw OCR/Text</summary>\n\n"
-                    f" ```{item['ocr_text']}```\n</details>\n\n"
-                )
+            for j, (page_num, page_text) in enumerate(batch):
+                result = {
+                    "document": path.name,
+                    "category": path.parent.name,
+                    "page": page_num,
+                    "summary": (
+                        summary
+                        if j == 0
+                        else "See summary for page range starting at "
+                        + str(batch[0][0])
+                    ),
+                    "ocr_text": page_text,
+                    "source_metadata": metadata,
+                }
+                doc_page_results.append(result)
 
+        # Save results for this document
+        if doc_page_results:
+            with open(json_output_filename, "w", encoding="utf-8") as f:
+                json.dump(doc_page_results, f, ensure_ascii=False, indent=2)
+            generate_markdown_from_json(json_output_filename, md_filename)
+            all_summary_results.extend(doc_page_results)
+
+    # Output the final compilation JSON
     with open(output_json_path, "w", encoding="utf-8") as f:
-        json.dump(summary_results, f, ensure_ascii=False, indent=2)
+        json.dump(all_summary_results, f, ensure_ascii=False, indent=2)
 
     console.print(
-        f"\n Markdown summaries saved in `{output_markdown_dir}`.\n"
-        f" Full data saved in `{output_json_path}`."
+        f"\n Individual summaries saved in `{output_markdown_dir}`.\n"
+        f" Full data compilation saved in `{output_json_path}`."
     )
 
 
