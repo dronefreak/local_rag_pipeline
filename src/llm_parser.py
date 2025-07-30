@@ -126,11 +126,6 @@ def parse_data_with_llms(config: DictConfig):
             continue
 
         doc_page_results = []
-
-        # --- THIS IS THE CORRECTED LOOP ---
-        # We iterate directly over the range, as 'track' is not needed here
-        # since the outer loop already has a progress bar.
-        # However, for consistency with the prompt, we will process in batches.
         for i in range(0, len(page_texts), config.llm_parser.batch_size):
             batch = page_texts[i : i + config.llm_parser.batch_size]
 
@@ -164,7 +159,7 @@ def parse_data_with_llms(config: DictConfig):
                 }
                 doc_page_results.append(result)
 
-        # 5. Save results for this document
+        # Save results for this document
         if doc_page_results:
             with open(json_output_filename, "w", encoding="utf-8") as f:
                 json.dump(doc_page_results, f, ensure_ascii=False, indent=2)
