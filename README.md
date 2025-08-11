@@ -45,8 +45,6 @@ Follow these steps to get your own local AI assistant up and running!
     ```
 3.  You can find some data samples that I was using personally on my side [here](https://drive.google.com/drive/folders/14E74tuIjifEIZlxSCR2WUpSBUx3d8jMg?usp=sharing). These documents are available on the internet for free and there is no copyright issue, in fact most of them are datasheets of electronic equipments that are made public by the companies themselves. Just download and unzip the folder `data.zip` and you will have a pre-formatted data directory structure ready to use. For the moment, you can parse CSV, PDFs and .TXT files. Other file strucutres are to be added soon.
 
-If you also want the pre
-
 ### 4. Configure and Run
 
 1.  **Download a model with Ollama:** I personally recommend starting with a simpler model like Llama or Mistral. Please install Ollama first (it is fairly simple), now run the following command in a separate terminal:
@@ -128,5 +126,22 @@ This is an example created using the datasheet of ADXL380 accelerometer, if you 
 - [src/llm_parser.py](src/llm_parser.py): An independent parsing technique using OCR + LLMs for a variety of file types.
 
 If you like this project, leave a star so and please feel free to point out issues and open up discussions on what could be improved/changed or done better in this project.
+
+## Side Note on GPU VRAM and LLM Size
+
+Here’s a VRAM-to-model-size reference for running LLMs fully in GPU memory without CPU offloading, assuming typical 4-bit quantization (most efficient common setup that still works well for consumer GPUs):
+
+| **VRAM (GB)** | **Max Model Size (B params)** | **Example Models**                   | **Notes**                                             |
+| ------------- | ----------------------------- | ------------------------------------ | ----------------------------------------------------- |
+| **4 GB**      | \~3B–4B                       | Mistral 3B, Pythia 2.8B              | Tiny models for chat, low reasoning power.            |
+| **6 GB**      | \~6B                          | LLaMA 2 7B (tight fit), OpenLLaMA 7B | Still limited context length.                         |
+| **8 GB**      | \~7B–8B                       | LLaMA 2 7B, Mistral 7B, GPT-J 6B     | Good sweet spot for smaller local assistants.         |
+| **12 GB**     | \~13B                         | LLaMA 2 13B, Guanaco 13B             | Fits in memory with room for larger context.          |
+| **16 GB**     | \~20B                         | Falcon 20B, GPT-NeoX 20B             | Decent for complex reasoning, slower to load.         |
+| **24 GB**     | \~30B                         | LLaMA 30B, Falcon 30B                | High-quality text generation, big jump in capability. |
+| **48 GB**     | \~65B–70B                     | LLaMA 2 70B (4-bit)                  | Upper end for consumer hardware (e.g., RTX 6000 Ada). |
+| **80 GB**     | \~65B–70B (in FP16)           | LLaMA 2 70B, Falcon 180B (partial)   | Needed for FP16 high-precision inference.             |
+
+You can adapt the modesl on your PC according to the size of available GPU by following the above table! The exact reproducibilty of the results is not guranteed since the models could differ from machine to machine, but the basic functionality would still be the same.
 
 As always, Hare Krishna and happy coding!
